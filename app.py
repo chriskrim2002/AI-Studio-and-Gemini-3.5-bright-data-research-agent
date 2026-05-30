@@ -32,7 +32,6 @@ with tab2:
         type=["wav", "mp3", "aac", "m4a"]
     )
     if audio_file is not None:
-        # Dynamically preserve the exact file extension of the uploaded audio
         file_ext = audio_file.name.split(".")[-1].lower()
         temp_audio_path = f"temp_query.{file_ext}"
         
@@ -43,13 +42,16 @@ with tab2:
         
         # Run Speechmatics transcription
         with st.spinner("Speechmatics is transcribing your voice recording..."):
-            transcribed_query = SpeechmaticsVoiceService.transcribe_audio(temp_audio_path)
-            if transcribed_query:
-                # Strip out punctuation to get a clean search query
-                company = re.sub(r'[^\w\s]', '', transcribed_query).strip()
-                st.info(f"Transcribed Search Query: **{company}**")
-            else:
-                st.error("Speechmatics could not transcribe the audio. Please try again.")
+            try:
+                transcribed_query = SpeechmaticsVoiceService.transcribe_audio(temp_audio_path)
+                if transcribed_query:
+                    company = re.sub(r'[^\w\s]', '', transcribed_query).strip()
+                    st.info(f"Transcribed Search Query: **{company}**")
+                else:
+                    st.error("Speechmatics returned an empty transcript. Please make sure the audio contains clear speech.")
+            except Exception as e:
+                # Renders the EXACT error details inside your red warning box instantly!
+                st.error(f"Speechmatics failed to transcribe. Details: {e}")
 
 # Trigger generate button
 if st.button("Generate Research Report", type="primary"):
@@ -58,12 +60,10 @@ if st.button("Generate Research Report", type="primary"):
     else:
         with st.spinner(f"Agent is actively searching and scraping web sources for '{company}'..."):
             try:
-                # Runs the main agent loop
                 report = run_research_agent(company)
                 
                 st.success("Research Complete!")
                 
-                # Split page into columns
                 col1, col2 = st.columns([3, 1])
                 
                 with col1:

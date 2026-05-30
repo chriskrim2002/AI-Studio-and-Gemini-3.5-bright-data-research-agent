@@ -18,13 +18,11 @@ load_dotenv()
 def get_env_var(var_name: str) -> str:
     """Reads keys safely from Streamlit secrets (cloud) or standard env variables (local)."""
     try:
-        # Try Streamlit Secrets first (for cloud hosting)
         import streamlit as st
         if var_name in st.secrets:
             return st.secrets[var_name]
     except Exception:
         pass
-    # Fall back to standard environment variables (for local codespaces)
     return os.getenv(var_name, "")
 
 # Configuration
@@ -102,22 +100,20 @@ def safe_run_async(async_func, *args, **kwargs):
 # -------------------------------------------------------------
 
 class SpeechmaticsVoiceService:
-    """Handles multi-platform, multi-format speech-to-text processing using Speechmatics Batch SDK."""
+    """Handles multi-platform, multi-format STT using Speechmatics Batch SDK and raises diagnostic errors."""
     @staticmethod
     def transcribe_audio(audio_file_path: str) -> str:
         api_key = get_env_var("SPEECHMATICS_API_KEY")
         
+        # Diagnostics
         if not api_key:
-            print("[Speechmatics Error]: SPEECHMATICS_API_KEY is completely missing from env/secrets.")
-            return ""
+            raise Exception("SPEECHMATICS_API_KEY is completely missing from your secrets configuration.")
         if "your_speechmatics" in api_key.lower():
-            print("[Speechmatics Error]: You are using the placeholder 'your_speechmatics_api_key_here'.")
-            return ""
+            raise Exception("You are currently using the placeholder 'your_speechmatics_api_key_here'. Please replace it with your real key.")
         if not os.path.exists(audio_file_path):
-            print(f"[Speechmatics Error]: Local audio file not found at {audio_file_path}")
-            return ""
+            raise Exception(f"Local audio file was not written to disk at {audio_file_path}")
             
-        print(f"[Speechmatics Log]: Initializing upload for {audio_file_path} to Speechmatics Batch API...")
+        print(f"[Speechmatics Log]: Initializing upload for {audio_file_path} to Speechmatics Batch API...", flush=True)
         
         async def run_transcription(file_path):
             client = AsyncClient(api_key=api_key)
@@ -130,15 +126,14 @@ class SpeechmaticsVoiceService:
                 await client.close()
                 return result.transcript_text.strip()
             except Exception as e:
-                print(f"[Speechmatics SDK Error]: {str(e)}")
-                raise e
+                # Bubble up the raw SDK/API error message (e.g. 401 Unauthorized)
+                raise Exception(f"Speechmatics SDK Error: {str(e)}")
 
         try:
             transcript = safe_run_async(run_transcription, audio_file_path)
             return transcript
         except Exception as e:
-            print(f"[Speechmatics Execution Failure]: Thread failed to complete task: {e}")
-            return ""
+            raise Exception(f"{e}")
 
 class TriggerWareWorkflowService:
     """Handles automated workflow actions post-research."""
@@ -146,10 +141,10 @@ class TriggerWareWorkflowService:
     def trigger_report_automation(company_name: str, report_text: str):
         webhook_url = get_env_var("TRIGGERWARE_WEBHOOK_URL")
         if not webhook_url or "webhook_url_here" in webhook_url:
-            print("[Triggerware Warning]: No TRIGGERWARE_WEBHOOK_URL configured. Skipping automation.")
+            print("[Triggerware Warning]: No TRIGGERWARE_WEBHOOK_URL configured. Skipping automation.", flush=True)
             return False
             
-        print(f"[Triggerware Log]: Sending completed research report for '{company_name}' to automated workflow...")
+        print(f"[Triggerware Log]: Sending completed research report for '{company_name}' to automated workflow...", flush=True)
         
         payload = {
             "event": "research_completed",
@@ -161,39 +156,36 @@ class TriggerWareWorkflowService:
         try:
             resp = requests.post(webhook_url, json=payload, timeout=15)
             resp.raise_for_status()
-            print("[Triggerware Success]: Workflow successfully triggered!")
+            print("[Triggerware Success]: Workflow successfully triggered!", flush=True)
             return True
         except Exception as e:
-            print(f"[Triggerware Error]: Failed to trigger workflow: {e}")
+            print(f"[Triggerware Error]: Failed to trigger workflow: {e}", flush=True)
             return False
 
 class CogneeMemoryService:
     """Handles structured semantic memory across research runs."""
     @staticmethod
     def save_to_memory(company: str, founders: list, valuation: str):
-        print(f"[Cognee Memory Log]: Storing graph nodes for {company} (Valuation: {valuation})")
+        print(f"[Cognee Memory Log]: Storing graph nodes for {company} (Valuation: {valuation})", flush=True)
         return True
         
     @staticmethod
     def retrieve_context(company: str) -> str:
-        print(f"[Cognee Memory Log]: Checking context history for {company}")
+        print(f"[Cognee Memory Log]: Checking context history for {company}", flush=True)
         return ""
 
 # -------------------------------------------------------------
 # Core Tool Actions
 # -------------------------------------------------------------
 def search_web(query: str) -> dict:
-    """
-    Search Google for live information about a company. 
-    Uses safe dictionary lookups to prevent KeyError crashes.
-    """
+    """Search Google for live information about a company."""
     search_url = f"https://www.google.com/search?q={requests.utils.quote(query)}&hl=en&gl=us"
     payload = {"zone": SERP_ZONE, "url": search_url, "format": "json"}
     try:
         resp = requests.post(BRIGHT_DATA_ENDPOINT, headers=BD_HEADERS, json=payload, timeout=30)
         
         if resp.status_code != 200:
-            print(f"\n[Bright Data Search Error]: HTTP {resp.status_code} - {resp.text}")
+            print(f"\n[Bright Data Search Error]: HTTP {resp.status_code} - {resp.text}", flush=True)
             
         resp.raise_for_status()
         body = json.loads(resp.json()["body"])
@@ -208,11 +200,8 @@ def search_web(query: str) -> dict:
         return {"error": f"Failed to complete search: {str(e)}"}
 
 def scrape_url(url: str) -> dict:
-    """
-    Scrape and extract clean, logical text from any target URL.
-    Includes a robust local fallback in case the Bright Data Web Unlocker is locked.
-    """
-    print(f"[Scraper]: Attempting to fetch {url}...")
+    """Scrape webpage. Includes local fallback if Web Unlocker is locked."""
+    print(f"[Scraper]: Attempting to fetch {url}...", flush=True)
     
     if UNLOCKER_ZONE and "web_unlocker1" in UNLOCKER_ZONE:
         payload = {"zone": UNLOCKER_ZONE, "url": url, "format": "raw"}
@@ -225,7 +214,7 @@ def scrape_url(url: str) -> dict:
                 cleaned_text = re.sub(r"\s+", " ", soup.get_text(separator=" ")).strip()[:4000]
                 return {"content": cleaned_text}
         except Exception as e:
-            print(f"[Bright Data Scraper Warning]: Web Unlocker failed, using local fallback. Error: {e}")
+            print(f"[Bright Data Scraper Warning]: Web Unlocker failed, using local fallback. Error: {e}", flush=True)
             
     try:
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=15)
@@ -236,9 +225,9 @@ def scrape_url(url: str) -> dict:
             cleaned_text = re.sub(r"\s+", " ", soup.get_text(separator=" ")).strip()[:4000]
             return {"content": cleaned_text}
     except Exception as e:
-        print(f"[Local Scraper Fallback Warning]: Local request failed: {e}")
+        print(f"[Local Scraper Fallback Warning]: Local request failed: {e}", flush=True)
         
-    print("[Scraper Fallback]: Returning mock content to keep the agent loop running.")
+    print("[Scraper Fallback]: Returning mock content to keep the agent loop running.", flush=True)
     return {
         "content": (
             f"Simulated page content for {url}. This company is highly active. "
@@ -253,11 +242,12 @@ SYSTEM_PROMPT = (
     "deeply researched report on the requested startup or company. "
     "Synthesize the gathered live data into a markdown report containing: "
     "Company Overview, Founders, Key Leadership, Funding History (list all rounds in a table), "
-    "Business Model, and Recent News."
-    "Rank the company challenges and opportunities based on market value"
-    "Base on the wealth amount of data available to you on internet,local news and international news, suggest best ways to solve these Ranked company's challenges and opportunities based on market value "
-    "Rank the company present challenges and opportunities based on market value"
-    "Base on the wealth amount of data available to you on internet,local news and international news, suggest best ways to solve these Ranked company's present challenges and opportunities based on market value "
+    "Business Model, and Recent News. "
+     "Rank company's challenges and opportunities with their market values."
+    "Based on all the data on the internet, local, and international news suggest best solutions to the company's ranked challenges and opportunities with their market values. "
+    "Rank company's present challenges and opportunities with their market values."
+    "Ranked company's present challenges and opportunities with their market values that they are solving presently."
+    "Based on all the data on the internet, local, and international news suggest best solutions to the company's ranked present challenges and opportunities with their market values that they are solving presently."
     "You must run multiple relevant searches and scrapings to verify details. "
     "Do not stop until you have gathered sufficient, verified information. "
     "Always provide inline markdown hyperlink citations pointing directly to the scraped source URLs. "
@@ -268,7 +258,7 @@ SYSTEM_PROMPT = (
 def run_research_agent(company_name: str):
     memory_context = CogneeMemoryService.retrieve_context(company_name)
     
-    print(f"Researching: {company_name} using AI/ML API Brain ({REASONING_MODEL})")
+    print(f"Researching: {company_name} using AI/ML API Brain ({REASONING_MODEL})", flush=True)
     print("=" * 50)
 
     messages = [
@@ -284,7 +274,6 @@ def run_research_agent(company_name: str):
         else:
             return {"error": "Invalid tool requested."}
 
-    # STRICT BUDGET safety cap to preserve your AI/ML credits
     MAX_TURNS = 3  
     turn_count = 0
 
@@ -292,7 +281,7 @@ def run_research_agent(company_name: str):
         turn_count += 1
         
         if turn_count > MAX_TURNS:
-            print("\n[Credit Safety Cap]: Reached max turns limit. Compiling final report from gathered context...")
+            print("\n[Credit Safety Cap]: Reached max turns limit. Compiling final report...", flush=True)
             response = aiml_client.chat.completions.create(
                 model=REASONING_MODEL,
                 messages=messages + [{"role": "user", "content": "Write your final report now using only the current gathered information. Do not call any more tools."}],
@@ -320,12 +309,12 @@ def run_research_agent(company_name: str):
             TriggerWareWorkflowService.trigger_report_automation(company_name, report_content)
             CogneeMemoryService.save_to_memory(company_name, [], "TBA")
             
-            print("\nResearch Complete!")
+            print("\nResearch Complete!", flush=True)
             print("=" * 50)
             return report_content
 
         tool_calls = response_message.tool_calls
-        print(f"\n[Agent Strategy - Turn {turn_count}/{MAX_TURNS}]: Executing {len(tool_calls)} tasks in parallel...")
+        print(f"\n[Agent Strategy - Turn {turn_count}/{MAX_TURNS}]: Executing {len(tool_calls)} tasks in parallel...", flush=True)
 
         def thread_worker(tool_call):
             args = json.loads(tool_call.function.arguments)
@@ -336,8 +325,8 @@ def run_research_agent(company_name: str):
             parallel_results = list(executor.map(thread_worker, tool_calls))
 
         for tool_call_id, tool_name, tool_output in parallel_results:
-            print(f"-> Completed Tool: {tool_name}")
-            print(f"   [Preview]: {str(tool_output)[:100]}...")
+            print(f"-> Completed Tool: {tool_name}", flush=True)
+            print(f"   [Preview]: {str(tool_output)[:100]}...", flush=True)
             
             messages.append({
                 "role": "tool",
