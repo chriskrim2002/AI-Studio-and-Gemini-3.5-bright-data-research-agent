@@ -1,6 +1,7 @@
 import streamlit as st
 import os
-from agent import run_research_agent
+import re
+from agent import run_research_agent, SpeechmaticsVoiceService
 
 # Set up page configurations
 st.set_page_config(
@@ -12,18 +13,49 @@ st.set_page_config(
 st.title("🔍 Gemini 3.5 Autonomous Research Agent")
 st.subheader("Powered by Google AI Studio & Bright Data")
 st.write(
-    "Enter any company name below. The agent will autonomously execute parallel Google searches, "
-    "scrape target webpages with BeautifulSoup, and synthesize a complete Markdown report."
+    "Enter a company name below, or **upload a voice recording** from any mobile phone or laptop."
 )
 
-# Input field
-company = st.text_input("Enter Company or Startup Name:", placeholder="e.g., Mistral AI, Udio, Cursor")
+# Create layout tabs: Text Input vs Voice Input
+tab1, tab2 = st.tabs(["⌨️ Text Query", "🎙️ Voice Query"])
 
+company = ""
+
+with tab1:
+    text_input = st.text_input("Enter Company or Startup Name:", placeholder="e.g., Mistral AI, Udio, Cursor")
+    if text_input:
+        company = text_input
+
+with tab2:
+    audio_file = st.file_uploader(
+        "Upload a voice recording of the company name (.wav, .mp3, .aac, .m4a):", 
+        type=["wav", "mp3", "aac", "m4a"]
+    )
+    if audio_file is not None:
+        # Dynamically preserve the exact file extension of the uploaded audio
+        file_ext = audio_file.name.split(".")[-1].lower()
+        temp_audio_path = f"temp_query.{file_ext}"
+        
+        with open(temp_audio_path, "wb") as f:
+            f.write(audio_file.read())
+            
+        st.audio(temp_audio_path, format=f"audio/{file_ext}")
+        
+        # Run Speechmatics transcription
+        with st.spinner("Speechmatics is transcribing your voice recording..."):
+            transcribed_query = SpeechmaticsVoiceService.transcribe_audio(temp_audio_path)
+            if transcribed_query:
+                # Strip out punctuation to get a clean search query
+                company = re.sub(r'[^\w\s]', '', transcribed_query).strip()
+                st.info(f"Transcribed Search Query: **{company}**")
+            else:
+                st.error("Speechmatics could not transcribe the audio. Please try again.")
+
+# Trigger generate button
 if st.button("Generate Research Report", type="primary"):
     if not company:
-        st.warning("Please enter a company name.")
+        st.warning("Please enter a company name or upload an audio file first.")
     else:
-        # Visual loading spinner for the user
         with st.spinner(f"Agent is actively searching and scraping web sources for '{company}'..."):
             try:
                 # Runs the main agent loop
@@ -40,7 +72,6 @@ if st.button("Generate Research Report", type="primary"):
                     
                 with col2:
                     st.markdown("### ⚙️ Actions")
-                    # Create a direct download button for the generated report
                     st.download_button(
                         label="📥 Download Markdown Report",
                         data=report,
