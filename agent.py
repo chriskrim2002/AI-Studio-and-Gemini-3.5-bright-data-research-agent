@@ -14,22 +14,35 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Helper to load secrets safely on both local machine (os.getenv) and Streamlit Cloud (st.secrets)
+def get_env_var(var_name: str) -> str:
+    """Reads keys safely from Streamlit secrets (cloud) or standard env variables (local)."""
+    try:
+        # Try Streamlit Secrets first (for cloud hosting)
+        import streamlit as st
+        if var_name in st.secrets:
+            return st.secrets[var_name]
+    except Exception:
+        pass
+    # Fall back to standard environment variables (for local codespaces)
+    return os.getenv(var_name, "")
+
 # Configuration
 BRIGHT_DATA_ENDPOINT = "https://api.brightdata.com/request"
 
 # 1. Add Content-Type header to ensure Bright Data parses the JSON payload correctly
 BD_HEADERS = {
-    "Authorization": f"Bearer {os.getenv('BRIGHT_DATA_API_KEY')}",
+    "Authorization": f"Bearer {get_env_var('BRIGHT_DATA_API_KEY')}",
     "Content-Type": "application/json"
 }
 
-SERP_ZONE = os.getenv("SERP_ZONE")
-UNLOCKER_ZONE = os.getenv("UNLOCKER_ZONE")
+SERP_ZONE = get_env_var("SERP_ZONE")
+UNLOCKER_ZONE = get_env_var("UNLOCKER_ZONE")
 
 # 2. Initialize OpenAI Client pointing to AI/ML API
 aiml_client = OpenAI(
     base_url="https://api.aimlapi.com/v1",
-    api_key=os.getenv("AIMLAPI_API_KEY")
+    api_key=get_env_var("AIMLAPI_API_KEY")
 )
 
 # 3. Active Model Selection (gpt-4o-mini is robust, highly capable, and extremely cheap)
@@ -92,13 +105,13 @@ class SpeechmaticsVoiceService:
     """Handles multi-platform, multi-format speech-to-text processing using Speechmatics Batch SDK."""
     @staticmethod
     def transcribe_audio(audio_file_path: str) -> str:
-        api_key = os.getenv("SPEECHMATICS_API_KEY")
+        api_key = get_env_var("SPEECHMATICS_API_KEY")
         
         if not api_key:
-            print("[Speechmatics Error]: SPEECHMATICS_API_KEY is completely missing from .env.")
+            print("[Speechmatics Error]: SPEECHMATICS_API_KEY is completely missing from env/secrets.")
             return ""
         if "your_speechmatics" in api_key.lower():
-            print("[Speechmatics Error]: You are using the placeholder 'your_speechmatics_api_key_here' in your .env. Please replace it with a real key.")
+            print("[Speechmatics Error]: You are using the placeholder 'your_speechmatics_api_key_here'.")
             return ""
         if not os.path.exists(audio_file_path):
             print(f"[Speechmatics Error]: Local audio file not found at {audio_file_path}")
@@ -131,7 +144,7 @@ class TriggerWareWorkflowService:
     """Handles automated workflow actions post-research."""
     @staticmethod
     def trigger_report_automation(company_name: str, report_text: str):
-        webhook_url = os.getenv("TRIGGERWARE_WEBHOOK_URL")
+        webhook_url = get_env_var("TRIGGERWARE_WEBHOOK_URL")
         if not webhook_url or "webhook_url_here" in webhook_url:
             print("[Triggerware Warning]: No TRIGGERWARE_WEBHOOK_URL configured. Skipping automation.")
             return False
@@ -186,7 +199,6 @@ def search_web(query: str) -> dict:
         body = json.loads(resp.json()["body"])
         organic = body.get("organic", [])
         
-        # Safe get() lookups prevent key errors if node properties differ
         results = "\n".join(
             f"{r.get('title', 'No Title')}: {r.get('url', r.get('link', '#'))}\n{r.get('description', r.get('snippet', ''))}" 
             for r in organic[:5]
@@ -241,12 +253,11 @@ SYSTEM_PROMPT = (
     "deeply researched report on the requested startup or company. "
     "Synthesize the gathered live data into a markdown report containing: "
     "Company Overview, Founders, Key Leadership, Funding History (list all rounds in a table), "
-    "Business Model, and Recent News. "
-     "Rank company's challenges and opportunities with their market values."
-    "Based on all the data on the internet, local, and international news suggest best solutions to the company's ranked challenges and opportunities with their market values. "
-    "Rank company's present challenges and opportunities with their market values."
-    "Ranked company's present challenges and opportunities with their market values that they are solving presently."
-    "Based on all the data on the internet, local, and international news suggest best solutions to the company's ranked present challenges and opportunities with their market values that they are solving presently."
+    "Business Model, and Recent News."
+    "Rank the company challenges and opportunities based on market value"
+    "Base on the wealth amount of data available to you on internet,local news and international news, suggest best ways to solve these Ranked company's challenges and opportunities based on market value "
+    "Rank the company present challenges and opportunities based on market value"
+    "Base on the wealth amount of data available to you on internet,local news and international news, suggest best ways to solve these Ranked company's present challenges and opportunities based on market value "
     "You must run multiple relevant searches and scrapings to verify details. "
     "Do not stop until you have gathered sufficient, verified information. "
     "Always provide inline markdown hyperlink citations pointing directly to the scraped source URLs. "
@@ -273,14 +284,13 @@ def run_research_agent(company_name: str):
         else:
             return {"error": "Invalid tool requested."}
 
-    # STRICT BUDGET safety cap to preserve your $3.00 AI/ML credits
+    # STRICT BUDGET safety cap to preserve your AI/ML credits
     MAX_TURNS = 3  
     turn_count = 0
 
     while True:
         turn_count += 1
         
-        # If we exceed the budget turn count, force compile final report
         if turn_count > MAX_TURNS:
             print("\n[Credit Safety Cap]: Reached max turns limit. Compiling final report from gathered context...")
             response = aiml_client.chat.completions.create(
