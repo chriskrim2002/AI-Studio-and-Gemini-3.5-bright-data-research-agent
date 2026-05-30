@@ -1,0 +1,6 @@
+openai
+beautifulsoup4
+speechmatics-batch
+requests
+python-dotenv
+streamlit
